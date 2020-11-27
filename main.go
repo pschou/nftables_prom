@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"reflect"
@@ -21,27 +22,17 @@ type nftables struct {
 	Entry []interface{} `json:"nftables"`
 }
 
-func printMap(dat interface{}) string {
-	//fmt.Printf("dat = %v  (%v)\n", dat, reflect.TypeOf(dat).Kind())
-	dat_s, _ := dat.(map[string]interface{})
-	s := []string{}
-	for k, v := range dat_s {
-		switch reflect.TypeOf(v).Kind() {
-		//case reflect.String:
-		//	s = fmt.Sprintf("%s %s:%s", s, k, v)
-		case reflect.Map:
-			s = append(s, fmt.Sprintf("%s[%s]", k, printMap(v)))
-		//s = fmt.Sprintf("%s %s:%v", s, k, lv)
-		default:
-			s = append(s, fmt.Sprintf("%s:%s", k, v))
-			//s = fmt.Sprintf("%s %s[%s]", k, printMap(lv))
-		}
-	}
-	sort.Strings(s)
-	return strings.Join(s, " ")
-}
+var size_suffix string
+var size_bins []int
 
 func main() {
+	size_suffix = "_SIZE"
+	for i := 1; i <= 20; i++ {
+		size_bins = append(size_bins, i*75)
+	}
+	size_bins = append(size_bins, 4500)
+	size_bins = append(size_bins, 9000)
+
 	listen := flag.String("listen", ":9732", "ip and port to listen on")
 	flag.Parse()
 	http.HandleFunc("/metrics", GetNFT)
@@ -82,6 +73,7 @@ func GetNFT(w http.ResponseWriter, req *http.Request) {
 	// print out the user Type, their name, and their facebook url
 	// as just an example
 	//fmt.Println("data ", nft.Entry[4])
+	iChain := make(map[string]int)
 	for _, nfentry := range nft.Entry {
 		nfentry_s := nfentry.(map[string]interface{})
 		if rule, ok := nfentry_s["rule"]; ok {
@@ -90,6 +82,17 @@ func GetNFT(w http.ResponseWriter, req *http.Request) {
 			rule_s := rule.(map[string]interface{})
 			keys := []string{}
 			for k, v := range rule_s {
+				if k == "chain" {
+					tablechain := fmt.Sprintf("%v:%v", rule_s["table"], v)
+					iChain[tablechain]++
+					keys = append(keys, fmt.Sprintf("num=\"%d\"", iChain[tablechain]))
+					log.Println("table chain", tablechain)
+
+					if strings.HasSuffix(tablechain, size_suffix) && iChain[tablechain] <= len(size_bins) {
+						keys = append(keys, fmt.Sprintf("le=\"%d\"", size_bins[iChain[tablechain]-1]))
+					}
+				}
+
 				if k == "expr" {
 					for _, ep := range v.([]interface{}) {
 						ep_s := ep.(map[string]interface{})
@@ -136,8 +139,8 @@ func GetNFT(w http.ResponseWriter, req *http.Request) {
 					keys = append(keys, fmt.Sprintf("%v=\"%v\"", k, v))
 				}
 			}
-			fmt.Fprintf(w, "nftables_rule_bytes{%s} %v\n", strings.Join(keys, ","), bytes)
-			fmt.Fprintf(w, "nftables_rule_packets{%s} %v\n", strings.Join(keys, ","), packets)
+			fmt.Fprintf(w, "nftables_rule_bytes_total{%s} %v\n", strings.Join(keys, ","), bytes)
+			fmt.Fprintf(w, "nftables_rule_packets_total{%s} %v\n", strings.Join(keys, ","), packets)
 		}
 	}
 	/*    for i := 0; i < len(users.Users); i++ {
@@ -148,4 +151,23 @@ func GetNFT(w http.ResponseWriter, req *http.Request) {
 	      }
 	*/
 
+}
+func printMap(dat interface{}) string {
+	//fmt.Printf("dat = %v  (%v)\n", dat, reflect.TypeOf(dat).Kind())
+	dat_s, _ := dat.(map[string]interface{})
+	s := []string{}
+	for k, v := range dat_s {
+		switch reflect.TypeOf(v).Kind() {
+		//case reflect.String:
+		//	s = fmt.Sprintf("%s %s:%s", s, k, v)
+		case reflect.Map:
+			s = append(s, fmt.Sprintf("%s[%s]", k, printMap(v)))
+		//s = fmt.Sprintf("%s %s:%v", s, k, lv)
+		default:
+			s = append(s, fmt.Sprintf("%s:%s", k, v))
+			//s = fmt.Sprintf("%s %s[%s]", k, printMap(lv))
+		}
+	}
+	sort.Strings(s)
+	return strings.Join(s, " ")
 }
