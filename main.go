@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	//"log"
 	"net/http"
 	"os/exec"
 	"reflect"
@@ -26,15 +26,19 @@ var size_suffix string
 var size_bins []int
 
 func main() {
-	size_suffix = "_SIZE"
-	for i := 1; i <= 20; i++ {
-		size_bins = append(size_bins, i*75)
-	}
-	size_bins = append(size_bins, 4500)
-	size_bins = append(size_bins, 9000)
-
 	listen := flag.String("listen", ":9732", "ip and port to listen on")
+	bins := flag.String("sizebins", "75,150,225,300,375,450,525,600,675,750,825,900,975,1050,1125,1200,1275,1350,1425,1500,4500,9000,inf", "transmit unit size bins in bytes")
+	sizesuffix := flag.String("sizesuffix", "_SIZE", "nftables chain suffix to bin")
 	flag.Parse()
+	size_suffix = *sizesuffix
+	for _, i := range strings.Split(*bins, ",") {
+		val, err := strconv.Atoi(i)
+		if err == nil {
+			size_bins = append(size_bins, val)
+		}
+	}
+	size_bins = append(size_bins, 1e10)
+
 	http.HandleFunc("/metrics", GetNFT)
 	http.ListenAndServe(*listen, nil)
 }
@@ -86,10 +90,15 @@ func GetNFT(w http.ResponseWriter, req *http.Request) {
 					tablechain := fmt.Sprintf("%v:%v", rule_s["table"], v)
 					iChain[tablechain]++
 					keys = append(keys, fmt.Sprintf("num=\"%d\"", iChain[tablechain]))
-					log.Println("table chain", tablechain)
+					//log.Println("table chain", tablechain)
 
 					if strings.HasSuffix(tablechain, size_suffix) && iChain[tablechain] <= len(size_bins) {
-						keys = append(keys, fmt.Sprintf("le=\"%d\"", size_bins[iChain[tablechain]-1]))
+						size := size_bins[iChain[tablechain]-1]
+						if size == 1e10 {
+							keys = append(keys, fmt.Sprintf("le=\"inf\""))
+						} else {
+							keys = append(keys, fmt.Sprintf("le=\"%d\"", size))
+						}
 					}
 				}
 
